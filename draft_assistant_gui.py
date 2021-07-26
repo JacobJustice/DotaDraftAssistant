@@ -2,6 +2,8 @@ from tkinter import *
 import pandas as pd
 from PIL import ImageTk, Image, ImageOps
 import tkinter.font as tkFont
+from pprint import pprint
+from ast import literal_eval
 
 BUTTON_PAD_X=4
 BUTTON_PAD_Y=2
@@ -11,7 +13,7 @@ root = Tk()
 root.title("DotA 2 Draft Assistant")
 #root.attributes('-fullscreen', True)
 
-largefont = tkFont.Font(family='Helvetica',size=24)
+largefont = tkFont.Font(family='Helvetica',size=32)
 
 ### Frames
 #
@@ -49,10 +51,10 @@ menu.pack(side=BOTTOM,fill=X)
 
 ### global state variables
 # if referencing a team True is Radiant and False is Dire
-team_radiant = None
-selecting_hero = False
-drafting_team = None
-current_drafted_button = None
+team_radiant = None # are you on the radiant?
+selecting_hero = False # are you selecting a hero?
+drafting_team = None # are you drafting for the radiant?
+current_drafted_button = None # pointer to the hero slot you are currently drafting for
 
 ###
 ### Buttons Labels and Input
@@ -83,16 +85,25 @@ def dire_select():
 
 select_radiant = Button(team_titles, text='The Radiant', bg='limegreen', command=radiant_select,width=5,cursor='hand1')
 select_radiant.pack(side=LEFT,fill=X,expand=True)
-select_dire = Button(team_titles, text='The Dire   ', bg='indianred', command=dire_select,width=5,cursor='hand1')
+select_dire = Button(team_titles, text='The Dire', bg='indianred', command=dire_select,width=5,cursor='hand1')
 select_dire.pack(side=RIGHT,fill=X,expand=True)
+
+## team heroes
+radiant_heroes = []
+dire_heroes = []
 
 ## radiant hero buttons
 def radiant_draft(button):
-    print_out('Drafting for The Radiant, select a hero')
-    selecting_hero = True #currently selecting a hero
-    drafting_team = True #drafting for Radiant
-    global current_drafted_button
-    current_drafted_button = button
+    if team_radiant is None:
+        print_out('Select a team')
+    else:
+        print_out('Drafting for The Radiant, select a hero')
+        global selecting_hero
+        global drafting_team
+        selecting_hero = True #currently selecting a hero
+        drafting_team = True #drafting for Radiant
+        global current_drafted_button
+        current_drafted_button = button
 
 img = Image.open('./data/portraits/dummy.png')
 dummy_image = ImageTk.PhotoImage(img)
@@ -109,11 +120,16 @@ radiant5.pack(side=LEFT,padx=2)
 
 ## dire hero buttons
 def dire_draft(button):
-    print_out('Drafting for The Dire, select a hero')
-    selecting_hero = True #currently selecting a hero
-    drafting_team = False #drafting for Dire
-    global current_drafted_button
-    current_drafted_button = button
+    if team_radiant is None:
+        print_out('Select a team')
+    else:
+        print_out('Drafting for The Dire, select a hero')
+        global selecting_hero
+        global drafting_team
+        selecting_hero = True #currently selecting a hero
+        drafting_team = False #drafting for Dire
+        global current_drafted_button
+        current_drafted_button = button
 dire1 = Button(dire, image=dummy_image, activebackground="white", bg='red',cursor='hand1',command=lambda:dire_draft(dire1))
 dire1.pack(side=RIGHT,padx=2)
 dire2 = Button(dire, image=dummy_image, activebackground="white", bg='red',cursor='hand1',command=lambda:dire_draft(dire2))
@@ -131,12 +147,11 @@ def search_callback(event):
     root.after(1,_search_callback)
 
 def _search_callback():
-    for hero in heroes:
-        if search_bar.get() not in hero.title:
-            hero.set_to_bw()
+    for hero in heroes.keys():
+        if search_bar.get() not in hero:
+            heroes[hero].set_to_bw()
         else:
-            hero.set_to_color()
-    print(search_bar.get())
+            heroes[hero].set_to_color()
 
 search_label = Label(search_bar_frame,text='Search for a hero',bg='lightgrey')
 search_label.pack(side=LEFT,padx=2,pady=3)
@@ -166,6 +181,7 @@ class Hero:
     draftability = 0
 
     drafted = False
+    bw = False
     def __init__(self, row, column_n, row_n):
         self.title = row['title']
         self.title_raw = row['title_raw']
@@ -182,17 +198,80 @@ class Hero:
         self.active_image = ImageTk.PhotoImage(img)
         
         if self.primary_stat.lower() == 'strength':
-            self.button = Button(strength,image=self.hero_image,cursor='hand1',command=self.clicked_callback)
+            self.button = Button(strength,image=self.hero_image,cursor='hand1',command=self.clicked_callback,activebackground='lightyellow')
         elif self.primary_stat.lower() == 'agility':
-            self.button = Button(agility,image=self.hero_image,cursor='hand1',command=self.clicked_callback)
+            self.button = Button(agility,image=self.hero_image,cursor='hand1',command=self.clicked_callback,activebackground='lightyellow')
         elif self.primary_stat.lower() == 'intelligence':
-            self.button = Button(intelligence,image=self.active_image,cursor='hand1',command=self.clicked_callback)
+            self.button = Button(intelligence,image=self.active_image,cursor='hand1',command=self.clicked_callback,activebackground='lightyellow')
         self.button.grid(column=column_n,row=row_n,padx=BUTTON_PAD_X, pady=BUTTON_PAD_Y,sticky='NESW')
 
     def clicked_callback(self):
-        global current_drafted_button
-        current_drafted_button.configure(image=self.hero_image)
-        current_drafted_button = None
+        global selecting_hero
+        if selecting_hero:
+            global drafting_team
+            global current_drafted_button
+            current_drafted_button.configure(image=self.hero_image)
+            self.drafted = True
+            current_drafted_button = None
+            self.update_portrait()
+
+            if drafting_team:
+                radiant_heroes.append(self.title)
+            else:
+                dire_heroes.append(self.title)
+
+            for hero in heroes.keys():
+                heroes[hero].compute_draftability()
+                
+            selecting_hero = False
+
+    def compute_draftability(self):
+        self.draftability = 0
+        global heroes
+        global team_radiant
+        good_against_copy = self.good_against
+        bad_against_copy = self.bad_against
+        well_with_copy = self.well_with
+        selecting_hero = False
+        for radiant_hero in radiant_heroes:
+            # if this hero is good against a hero on the radiant
+            self.update_draftability(radiant_hero, self.good_against, not team_radiant, True)
+            # if this hero is bad against a hero on the radiant
+            self.update_draftability(radiant_hero, self.bad_against, not team_radiant, False)
+            # if this hero works well with a hero on the radiant
+            self.update_draftability(radiant_hero, self.well_with, team_radiant, True)
+
+            # if a hero is good against this hero on the radiant and you're on the dire subtract 1
+            self.update_draftability(self.title, heroes[radiant_hero].good_against, not team_radiant, False)
+            self.update_draftability(self.title, heroes[radiant_hero].bad_against, not team_radiant, True)
+            self.update_draftability(self.title, heroes[radiant_hero].well_with,  team_radiant, True)
+
+        for dire_hero in dire_heroes:
+            # if this hero is good against a hero on the dire and you're on the radiant add 1
+            self.update_draftability(dire_hero, self.good_against, team_radiant, True)
+            self.update_draftability(dire_hero, self.bad_against, team_radiant, False)
+            self.update_draftability(dire_hero, self.well_with, not team_radiant, True)
+
+            # if a hero on the dire is good against this hero and you're on the radiant subtract 1
+            self.update_draftability(self.title, heroes[dire_hero].good_against, team_radiant, False)
+            self.update_draftability(self.title, heroes[dire_hero].bad_against, team_radiant, True)
+            self.update_draftability(self.title, heroes[dire_hero].well_with, not team_radiant, True)
+
+
+        self.update_portrait()
+
+
+    def update_draftability(self, hero_in, hero_list, correct_team, add_):
+        # if given hero is in given hero_list
+        if hero_in in hero_list:
+            # true if on the correct team
+            if correct_team:
+                # true if adding 1 to draftability false for subtract
+                if add_:
+                    self.draftability += 1
+                else:
+                    self.draftability -= 1
+
 
     def set_to_bw(self):
         self.bw = True
@@ -204,13 +283,19 @@ class Hero:
 
     def update_portrait(self):
         img = self.pil_image
-        if not drafted:
+        if not self.drafted:
             if self.draftability >= 0:
                 img = ImageOps.expand(img,border=self.draftability*2,fill='limegreen')
                 img = img.resize((85,48), Image.ANTIALIAS)
+                if self.draftability > 0:
+                    print(self.title, self.draftability)
+                    self.button.configure(bg='limegreen',text=str(self.draftability))
+                else:
+                    self.button.configure(bg='grey')
             else:
                 img = ImageOps.expand(img,border=self.draftability*-2,fill='red')
                 img = img.resize((85,48), Image.ANTIALIAS)
+                self.button.configure(bg='red',text=str(self.draftability))
 
             if self.bw:
                 img = ImageOps.grayscale(img)
@@ -225,9 +310,12 @@ class Hero:
 
 ## hero buttons
 df = pd.read_csv('./data/hero_data.csv')
+df.good_against = df.good_against.apply(literal_eval)
+df.bad_against = df.bad_against.apply(literal_eval)
+df.well_with = df.well_with.apply(literal_eval)
 
 #print(df)
-heroes = []
+heroes = {}
 
 # undoubtedly a better way to pass this info around but /shrug
 str_column = 0
@@ -245,19 +333,19 @@ intelligence.grid_columnconfigure(list(range(num_columns)),weight=1)
 print('num_columns',num_columns)
 for index, row in df.iterrows():
     if row['primary_stat'].lower() == 'strength':
-        heroes.append(Hero(row,str_column,str_row))
+        heroes.update({row['title']:Hero(row,str_column,str_row)})
         str_column+=1
         if str_column==num_columns:
             str_row+=1
             str_column=0
     elif row['primary_stat'].lower() == 'agility':
-        heroes.append(Hero(row,agi_column,agi_row))
+        heroes.update({row['title']:Hero(row,agi_column,agi_row)})
         agi_column+=1
         if agi_column==num_columns:
             agi_row+=1
             agi_column=0
     elif row['primary_stat'].lower() == 'intelligence':
-        heroes.append(Hero(row,int_column,int_row))
+        heroes.update({row['title']:Hero(row,int_column,int_row)})
         int_column+=1
         if int_column==num_columns:
             int_row+=1
