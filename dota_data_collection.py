@@ -81,7 +81,7 @@ hero_entries = get_hero_url_list(driver)
 df = pd.read_csv('./data/hero_data.csv')
 print(df)
 
-for hero_url in hero_entries:
+for i, hero_url in enumerate(hero_entries):
     df = df.append(hero_data := get_hero_data(driver, hero_url), ignore_index=True)
     print(hero_data,'\n')
     df.to_csv('./data/hero_data.csv',index=False)
